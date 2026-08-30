@@ -321,49 +321,54 @@ def telegram_bot():
 
                     # حالت AI
 
-                    if chat_id in ai_users:
-thinking_message = requests.post(
-    f"{TELEGRAM_URL}/sendMessage",
-    data={
-        "chat_id": chat_id,
-        "text": "🧠 دارم فکر می‌کنم..."
-    },
-    timeout=30
-)
+                                        if chat_id in ai_users:
 
-answer = ask_gemini(
-    chat_id,
-    text
-)
+                        thinking_message = requests.post(
+                            f"{TELEGRAM_URL}/sendMessage",
+                            data={
+                                "chat_id": chat_id,
+                                "text": "🧠 دارم فکر می‌کنم..."
+                            },
+                            timeout=30
+                        )
 
-# ارسال جواب Gemini
-send_message(
-    chat_id,
-    answer
-)
+                        answer = ask_gemini(
+                            chat_id,
+                            text
+                        )
 
-# حذف پیام «دارم فکر می‌کنم»
-try:
-    thinking_data = thinking_message.json()
+                        send_message(
+                            chat_id,
+                            answer
+                        )
 
-    if thinking_data.get("ok"):
-        thinking_message_id = (
-            thinking_data["result"]["message_id"]
-        )
+                        try:
 
-        requests.post(
-            f"{TELEGRAM_URL}/deleteMessage",
-            data={
-                "chat_id": chat_id,
-                "message_id": thinking_message_id
-            },
-            timeout=30
-        )
+                            thinking_data = thinking_message.json()
 
-except Exception as e:
-    print("❌ خطا در حذف پیام فکر کردن:", e)
+                            if thinking_data.get("ok"):
 
-continue
+                                thinking_message_id = (
+                                    thinking_data["result"]["message_id"]
+                                )
+
+                                requests.post(
+                                    f"{TELEGRAM_URL}/deleteMessage",
+                                    data={
+                                        "chat_id": chat_id,
+                                        "message_id": thinking_message_id
+                                    },
+                                    timeout=30
+                                )
+
+                        except Exception as e:
+
+                            print(
+                                "❌ خطا در حذف پیام فکر کردن:",
+                                e
+                            )
+
+                        continue
 
 
                     # ==================================
