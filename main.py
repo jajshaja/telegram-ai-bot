@@ -322,23 +322,48 @@ def telegram_bot():
                     # حالت AI
 
                     if chat_id in ai_users:
+thinking_message = requests.post(
+    f"{TELEGRAM_URL}/sendMessage",
+    data={
+        "chat_id": chat_id,
+        "text": "🧠 دارم فکر می‌کنم..."
+    },
+    timeout=30
+)
 
-                        send_message(
-                            chat_id,
-                            "🧠 دارم فکر می‌کنم..."
-                        )
+answer = ask_gemini(
+    chat_id,
+    text
+)
 
-                        answer = ask_gemini(
-                            chat_id,
-                            text
-                        )
+# ارسال جواب Gemini
+send_message(
+    chat_id,
+    answer
+)
 
-                        send_message(
-                            chat_id,
-                            answer
-                        )
+# حذف پیام «دارم فکر می‌کنم»
+try:
+    thinking_data = thinking_message.json()
 
-                        continue
+    if thinking_data.get("ok"):
+        thinking_message_id = (
+            thinking_data["result"]["message_id"]
+        )
+
+        requests.post(
+            f"{TELEGRAM_URL}/deleteMessage",
+            data={
+                "chat_id": chat_id,
+                "message_id": thinking_message_id
+            },
+            timeout=30
+        )
+
+except Exception as e:
+    print("❌ خطا در حذف پیام فکر کردن:", e)
+
+continue
 
 
                     # ==================================
