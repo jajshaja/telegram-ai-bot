@@ -1,20 +1,18 @@
 import os
 import json
 import time
+import threading
 import requests
+
+from flask import Flask
 
 
 # ==========================================
-# دریافت کلیدها از Environment Variables
+# کلیدها
 # ==========================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-
-# ==========================================
-# بررسی وجود کلیدها
-# ==========================================
 
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN تنظیم نشده است.")
@@ -36,17 +34,37 @@ GEMINI_URL = (
 
 offset = 0
 
-# کاربرانی که حالت هوش مصنوعی را فعال کرده‌اند
 ai_users = set()
-
-# تاریخچه مکالمه کاربران
 chat_history = {}
-
-print("🤖 ربات روشن شد!")
 
 
 # ==========================================
-# ارسال پیام به تلگرام
+# وب‌سرور مخصوص Render
+# ==========================================
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "🤖 Telegram AI Bot is running!"
+
+
+@app.route("/health")
+def health():
+    return "OK"
+
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
+
+
+# ==========================================
+# ارسال پیام تلگرام
 # ==========================================
 
 def send_message(chat_id, text, keyboard=None):
@@ -60,6 +78,7 @@ def send_message(chat_id, text, keyboard=None):
         data["reply_markup"] = json.dumps(keyboard)
 
     try:
+
         requests.post(
             f"{TELEGRAM_URL}/sendMessage",
             data=data,
@@ -67,6 +86,7 @@ def send_message(chat_id, text, keyboard=None):
         )
 
     except Exception as e:
+
         print("❌ خطا در ارسال پیام:", e)
 
 
@@ -79,7 +99,6 @@ def ask_gemini(chat_id, user_text):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
-    # پیام کاربر
     chat_history[chat_id].append(
         {
             "role": "user",
@@ -91,7 +110,6 @@ def ask_gemini(chat_id, user_text):
         }
     )
 
-    # فقط ۱۰ پیام آخر
     history = chat_history[chat_id][-10:]
 
     headers = {
@@ -116,10 +134,6 @@ def ask_gemini(chat_id, user_text):
 
         print("Gemini Status:", response.status_code)
 
-        # ==================================
-        # پاسخ موفق
-        # ==================================
-
         if response.status_code == 200:
 
             answer = (
@@ -128,7 +142,6 @@ def ask_gemini(chat_id, user_text):
                 ["text"]
             )
 
-            # ذخیره پاسخ Gemini
             chat_history[chat_id].append(
                 {
                     "role": "model",
@@ -142,18 +155,14 @@ def ask_gemini(chat_id, user_text):
 
             return answer
 
-        # ==================================
-        # خطای Gemini
-        # ==================================
-
         else:
 
             print("❌ Gemini Error:")
             print(result)
 
             return (
-                "❌ متأسفانه فعلاً نتونستم از "
-                "هوش مصنوعی جواب بگیرم.\n\n"
+                "❌ متأسفانه فعلاً نتونستم "
+                "از هوش مصنوعی جواب بگیرم.\n"
                 "چند لحظه دیگه دوباره امتحان کن."
             )
 
@@ -168,29 +177,37 @@ def ask_gemini(chat_id, user_text):
 
 
 # ==========================================
-# حلقه اصلی ربات
+# ربات تلگرام
 # ==========================================
 
-while True:
+def telegram_bot():
 
-    try:
+    global offset
 
-        response = requests.get(
-            f"{TELEGRAM_URL}/getUpdates",
-            params={
-                "offset": offset,
-                "timeout": 30
-            },
-            timeout=40
-        )
+    print("🤖 ربات تلگرام روشن شد!")
 
-        data = response.json()
+    while True:
 
-        if data["ok"]:
+        try:
+
+            response = requests.get(
+                f"{TELEGRAM_URL}/getUpdates",
+                params={
+                    "offset": offset,
+                    "timeout": 30
+                },
+                timeout=40
+            )
+
+            data = response.json()
+
+            if not data.get("ok"):
+                print("❌ خطای Telegram:", data)
+                time.sleep(3)
+                continue
 
             for update in data["result"]:
 
-                # جلو بردن offset
                 offset = update["update_id"] + 1
 
 
@@ -203,13 +220,9 @@ while True:
                     callback = update["callback_query"]
 
                     chat_id = callback["message"]["chat"]["id"]
-
                     callback_id = callback["id"]
-
                     button = callback["data"]
 
-
-                    # حذف Loading دکمه
                     try:
 
                         requests.post(
@@ -222,15 +235,10 @@ while True:
 
                     except Exception as e:
 
-                        print(
-                            "❌ Callback Error:",
-                            e
-                        )
+                        print("❌ Callback Error:", e)
 
 
-                    # ==================================
                     # درباره ربات
-                    # ==================================
 
                     if button == "about":
 
@@ -238,31 +246,25 @@ while True:
                             chat_id,
 
                             "🤖 درباره ربات\n\n"
-
-                            "این ربات با هدف ارائه "
-                            "یک دستیار هوشمند و کاربردی "
+                            "این ربات با هدف ارائه یک "
+                            "دستیار هوشمند و کاربردی "
                             "در محیط تلگرام ساخته شده است.\n\n"
-
                             "🧠 فناوری هوش مصنوعی این "
                             "ربات توسط Gemini API "
                             "تأمین می‌شود.\n\n"
-
                             "✨ در ساخت و توسعه این "
                             "ربات نیز از هوش مصنوعی "
                             "ChatGPT کمک گرفته شده است."
                         )
 
 
-                    # ==================================
                     # هوش مصنوعی
-                    # ==================================
 
                     elif button == "ai":
 
                         ai_users.add(chat_id)
 
                         if chat_id not in chat_history:
-
                             chat_history[chat_id] = []
 
                         send_message(
@@ -270,9 +272,7 @@ while True:
 
                             "🧠 حالت هوش مصنوعی "
                             "فعال شد!\n\n"
-
                             "هر چیزی می‌خوای بپرس.\n\n"
-
                             "برای خروج از حالت AI "
                             "بنویس:\n"
                             "/stop"
@@ -282,7 +282,7 @@ while True:
 
 
                 # ==================================
-                # پیام‌های معمولی
+                # پیام معمولی
                 # ==================================
 
                 if "message" in update:
@@ -296,15 +296,10 @@ while True:
                         ""
                     ).strip()
 
-                    print(
-                        "📩 پیام دریافت شد:",
-                        text
-                    )
+                    print("📩 پیام دریافت شد:", text)
 
 
-                    # ==================================
-                    # خروج از حالت AI
-                    # ==================================
+                    # خروج از AI
 
                     if text == "/stop":
 
@@ -324,15 +319,9 @@ while True:
                         continue
 
 
-                    # ==================================
                     # حالت AI
-                    # ==================================
 
                     if chat_id in ai_users:
-
-                        print(
-                            "🧠 ارسال پیام به Gemini..."
-                        )
 
                         send_message(
                             chat_id,
@@ -353,7 +342,7 @@ while True:
 
 
                     # ==================================
-                    # دستور /start
+                    # /start
                     # ==================================
 
                     if text == "/start":
@@ -392,13 +381,11 @@ while True:
 
                             "🤖 به دستیار هوشمند "
                             "ما خوش آمدید!\n\n"
-
                             "این ربات با بهره‌گیری "
                             "از Gemini API طراحی شده "
                             "تا تجربه‌ای سریع، هوشمند "
                             "و کاربردی را در اختیار شما "
                             "قرار دهد.\n\n"
-
                             "👇 گزینه موردنظر خود "
                             "را انتخاب کنید:",
 
@@ -406,9 +393,7 @@ while True:
                         )
 
 
-                    # ==================================
                     # سلام
-                    # ==================================
 
                     elif text == "سلام":
 
@@ -418,28 +403,37 @@ while True:
                         )
 
 
-                    # ==================================
                     # پیام ناشناخته
-                    # ==================================
 
                     else:
 
                         send_message(
-
                             chat_id,
-
                             "🤔 متوجه نشدم!\n"
-
                             "برای دیدن منوی ربات "
                             "/start رو بفرست."
                         )
 
+        except Exception as e:
 
-    except Exception as e:
+            print("❌ خطای کلی ربات:", e)
 
-        print(
-            "❌ خطای کلی:",
-            e
-        )
+            time.sleep(3)
 
-        time.sleep(3)
+
+# ==========================================
+# اجرای برنامه
+# ==========================================
+
+if __name__ == "__main__":
+
+    # اجرای وب‌سرور در یک Thread
+    web_thread = threading.Thread(
+        target=run_web_server,
+        daemon=True
+    )
+
+    web_thread.start()
+
+    # اجرای ربات تلگرام
+    telegram_bot()
