@@ -1,6 +1,8 @@
 import os
 import time
 import threading
+import base64
+import mimetypes
 import requests
 
 from flask import Flask
@@ -22,10 +24,12 @@ if not GEMINI_API_KEY:
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
-# مدل Gemini
+# مدل پایدار چندرسانه‌ای Gemini
+GEMINI_MODEL = "gemini-2.5-flash"
+
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
-    "v1beta/models/gemini-3.5-flash:generateContent"
+    f"v1beta/models/{GEMINI_MODEL}:generateContent"
 )
 
 
@@ -47,7 +51,6 @@ def health():
 
 
 def run_web_server():
-
     port = int(os.environ.get("PORT", 10000))
 
     print(f"🌐 Flask روی پورت {port} اجرا شد.")
@@ -153,7 +156,102 @@ def delete_message(chat_id, message_id):
 
 
 # ==================================================
-# ارتباط با Gemini
+# دریافت اطلاعات فایل از Telegram
+# ==================================================
+
+def get_telegram_file(file_id):
+
+    try:
+
+        response = requests.get(
+            f"{TELEGRAM_URL}/getFile",
+            params={
+                "file_id": file_id
+            },
+            timeout=30
+        )
+
+        result = response.json()
+
+        if not result.get("ok"):
+
+            print("❌ Telegram getFile Error:")
+            print(result)
+
+            return None
+
+        return result["result"].get("file_path")
+
+    except Exception as e:
+
+        print("❌ خطا در get_telegram_file:")
+        print(e)
+
+        return None
+
+
+# ==================================================
+# دانلود فایل از Telegram
+# ==================================================
+
+def download_telegram_file(file_path):
+
+    try:
+
+        url = (
+            f"https://api.telegram.org/"
+            f"file/bot{TELEGRAM_TOKEN}/"
+            f"{file_path}"
+        )
+
+        response = requests.get(
+            url,
+            timeout=60
+        )
+
+        if response.status_code != 200:
+
+            print(
+                "❌ خطا در دانلود فایل Telegram:",
+                response.status_code
+            )
+
+            return None
+
+        print(
+            f"📥 فایل دانلود شد: "
+            f"{len(response.content)} bytes"
+        )
+
+        return response.content
+
+    except Exception as e:
+
+        print("❌ خطا در دانلود فایل:")
+        print(e)
+
+        return None
+
+
+# ==================================================
+# تشخیص MIME تصویر
+# ==================================================
+
+def get_image_mime_type(file_path):
+
+    mime_type, _ = mimetypes.guess_type(
+        file_path
+    )
+
+    if mime_type and mime_type.startswith("image/"):
+        return mime_type
+
+    # Telegram معمولاً عکس را به شکل JPEG می‌دهد
+    return "image/jpeg"
+
+
+# ==================================================
+# ارتباط متنی با Gemini
 # ==================================================
 
 def ask_gemini(chat_id, user_text):
@@ -167,6 +265,7 @@ def ask_gemini(chat_id, user_text):
     if chat_id not in chat_history:
         chat_history[chat_id] = []
 
+    # ذخیره پیام کاربر
     chat_history[chat_id].append(
         {
             "role": "user",
@@ -198,7 +297,7 @@ def ask_gemini(chat_id, user_text):
             GEMINI_URL,
             headers=headers,
             json=data,
-            timeout=60
+            timeout=90
         )
 
         print(
@@ -206,156 +305,112 @@ def ask_gemini(chat_id, user_text):
             f"{response.status_code}"
         )
 
-        print(
-            f"📦 Gemini Response Length: "
-            f"{len(response.text)}"
-        )
-
-        # ------------------------------------------
-        # موفق
-        # ------------------------------------------
-
         if response.status_code == 200:
 
-            try:
+            result = response.json()
 
-                result = response.json()
+            candidates = result.get(
+                "candidates",
+                []
+            )
 
-                print("✅ پاسخ Gemini دریافت شد.")
-
-                candidates = result.get(
-                    "candidates",
-                    []
-                )
-
-                if not candidates:
-
-                    print(
-                        "❌ Gemini هیچ candidate ای برنگرداند."
-                    )
-
-                    print(result)
-
-                    return (
-                        "❌ هوش مصنوعی پاسخی برنگرداند."
-                    )
-
-                content = candidates[0].get(
-                    "content",
-                    {}
-                )
-
-                parts = content.get(
-                    "parts",
-                    []
-                )
-
-                if not parts:
-
-                    print(
-                        "❌ Gemini قسمت text ندارد."
-                    )
-
-                    print(result)
-
-                    return (
-                        "❌ پاسخ هوش مصنوعی "
-                        "قابل دریافت نبود."
-                    )
-
-                answer = parts[0].get(
-                    "text",
-                    ""
-                )
-
-                if not answer:
-
-                    return (
-                        "❌ هوش مصنوعی پاسخ خالی ارسال کرد."
-                    )
-
-                # ذخیره پاسخ در تاریخچه
-                chat_history[chat_id].append(
-                    {
-                        "role": "model",
-                        "parts": [
-                            {
-                                "text": answer
-                            }
-                        ]
-                    }
-                )
-
-                print("✅ پاسخ Gemini با موفقیت دریافت شد.")
-                print("========================================")
-
-                return answer
-
-            except Exception as e:
+            if not candidates:
 
                 print(
-                    "❌ خطا در پردازش JSON Gemini:"
+                    "❌ Gemini هیچ candidate ای برنگرداند."
                 )
 
-                print(e)
-
-                print("Raw response:")
-                print(response.text)
+                print(result)
 
                 return (
-                    "❌ پاسخ هوش مصنوعی "
-                    "قابل پردازش نبود."
+                    "❌ هوش مصنوعی پاسخی برنگرداند."
                 )
 
-        # ------------------------------------------
-        # خطای Gemini
-        # ------------------------------------------
+            content = candidates[0].get(
+                "content",
+                {}
+            )
+
+            parts = content.get(
+                "parts",
+                []
+            )
+
+            answer = ""
+
+            for part in parts:
+
+                if "text" in part:
+
+                    answer += part["text"]
+
+            if not answer:
+
+                return (
+                    "❌ هوش مصنوعی پاسخ خالی ارسال کرد."
+                )
+
+            # ذخیره پاسخ Gemini
+            chat_history[chat_id].append(
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "text": answer
+                        }
+                    ]
+                }
+            )
+
+            print(
+                "✅ پاسخ Gemini با موفقیت دریافت شد."
+            )
+
+            return answer
+
+        # ------------------------------
+        # خطاهای Gemini
+        # ------------------------------
+
+        print("❌ Gemini Error:")
+        print(response.text)
+
+        if response.status_code == 400:
+
+            return (
+                "❌ درخواست ارسال‌شده به Gemini "
+                "اشکال دارد."
+            )
+
+        elif response.status_code == 403:
+
+            return (
+                "❌ دسترسی به Gemini رد شد.\n\n"
+                "احتمالاً API Key یا دسترسی API "
+                "مشکل دارد."
+            )
+
+        elif response.status_code == 429:
+
+            return (
+                "⏳ درخواست‌های Gemini بیش از حد مجاز شده.\n"
+                "لطفاً کمی بعد دوباره امتحان کن."
+            )
+
+        elif response.status_code == 503:
+
+            return (
+                "⏳ سرویس Gemini فعلاً شلوغ است.\n"
+                "لطفاً چند لحظه بعد دوباره امتحان کن."
+            )
 
         else:
 
-            print("❌ Gemini Error:")
-            print(response.text)
-
-            # خطای API Key
-            if response.status_code == 400:
-
-                return (
-                    "❌ درخواست ارسال‌شده به Gemini "
-                    "اشکال دارد."
-                )
-
-            # دسترسی
-            elif response.status_code == 403:
-
-                return (
-                    "❌ دسترسی به Gemini رد شد.\n\n"
-                    "احتمالاً API Key یا دسترسی API "
-                    "مشکل دارد."
-                )
-
-            # محدودیت
-            elif response.status_code == 429:
-
-                return (
-                    "⏳ درخواست‌های Gemini بیش از حد مجاز شده.\n"
-                    "لطفاً کمی بعد دوباره امتحان کن."
-                )
-
-            # سرور Gemini
-            elif response.status_code == 503:
-
-                return (
-                    "⏳ سرویس Gemini فعلاً شلوغ است.\n"
-                    "لطفاً چند لحظه بعد دوباره امتحان کن."
-                )
-
-            else:
-
-                return (
-                    "❌ متأسفانه فعلاً نتونستم "
-                    "از هوش مصنوعی جواب بگیرم.\n"
-                    "چند لحظه دیگه دوباره امتحان کن."
-                )
+            return (
+                "❌ متأسفانه فعلاً نتونستم "
+                "از هوش مصنوعی جواب بگیرم.\n"
+                "چند لحظه دیگه دوباره امتحان کن."
+            )
 
     except requests.exceptions.Timeout:
 
@@ -368,10 +423,7 @@ def ask_gemini(chat_id, user_text):
 
     except requests.exceptions.RequestException as e:
 
-        print(
-            "❌ خطای ارتباط با Gemini:"
-        )
-
+        print("❌ خطای ارتباط با Gemini:")
         print(e)
 
         return (
@@ -380,15 +432,277 @@ def ask_gemini(chat_id, user_text):
 
     except Exception as e:
 
-        print(
-            "❌ خطای ناشناخته در Gemini:"
-        )
-
+        print("❌ خطای ناشناخته در Gemini:")
         print(e)
 
         return (
             "❌ هنگام ارتباط با هوش مصنوعی "
             "مشکلی پیش آمد."
+        )
+
+
+# ==================================================
+# تحلیل تصویر با Gemini
+# ==================================================
+
+def ask_gemini_image(
+    chat_id,
+    image_bytes,
+    mime_type,
+    user_text
+):
+
+    print("========================================")
+    print("🖼️ شروع تحلیل تصویر توسط Gemini")
+    print(f"👤 Chat ID: {chat_id}")
+    print(f"📝 متن همراه تصویر: {user_text}")
+    print(f"📦 MIME Type: {mime_type}")
+    print(f"📏 Image Size: {len(image_bytes)} bytes")
+    print("========================================")
+
+    if chat_id not in chat_history:
+        chat_history[chat_id] = []
+
+    if not user_text:
+
+        user_text = (
+            "این تصویر را با دقت بررسی کن و "
+            "توضیح مفیدی درباره آن بده."
+        )
+
+    # تبدیل تصویر به Base64
+    image_base64 = base64.b64encode(
+        image_bytes
+    ).decode("utf-8")
+
+    # ------------------------------------------------
+    # تاریخچه متنی قبلی
+    # ------------------------------------------------
+
+    history = chat_history[chat_id][-8:]
+
+    # ------------------------------------------------
+    # پیام فعلی شامل متن + تصویر
+    # ------------------------------------------------
+
+    current_message = {
+        "role": "user",
+        "parts": [
+            {
+                "text": user_text
+            },
+            {
+                "inline_data": {
+                    "mime_type": mime_type,
+                    "data": image_base64
+                }
+            }
+        ]
+    }
+
+    contents = history + [
+        current_message
+    ]
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
+
+    data = {
+        "contents": contents
+    }
+
+    try:
+
+        print("📡 در حال ارسال تصویر به Gemini...")
+
+        response = requests.post(
+            GEMINI_URL,
+            headers=headers,
+            json=data,
+            timeout=120
+        )
+
+        print(
+            f"🖼️ Gemini Image Status: "
+            f"{response.status_code}"
+        )
+
+        print(
+            f"📦 Response Length: "
+            f"{len(response.text)}"
+        )
+
+        if response.status_code == 200:
+
+            result = response.json()
+
+            candidates = result.get(
+                "candidates",
+                []
+            )
+
+            if not candidates:
+
+                print(
+                    "❌ Gemini برای تصویر "
+                    "candidate برنگرداند."
+                )
+
+                print(result)
+
+                return (
+                    "❌ نتونستم تصویر رو تحلیل کنم."
+                )
+
+            content = candidates[0].get(
+                "content",
+                {}
+            )
+
+            parts = content.get(
+                "parts",
+                []
+            )
+
+            answer = ""
+
+            for part in parts:
+
+                if "text" in part:
+
+                    answer += part["text"]
+
+            if not answer:
+
+                return (
+                    "❌ Gemini پاسخی برای تصویر "
+                    "ارسال نکرد."
+                )
+
+            # ------------------------------------------------
+            # ذخیره پیام تصویر در حافظه
+            # ------------------------------------------------
+
+            chat_history[chat_id].append(
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                "[تصویر ارسال شد] "
+                                + user_text
+                            )
+                        }
+                    ]
+                }
+            )
+
+            # ذخیره پاسخ
+            chat_history[chat_id].append(
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "text": answer
+                        }
+                    ]
+                }
+            )
+
+            # محدود کردن حافظه
+            if len(chat_history[chat_id]) > 20:
+
+                chat_history[chat_id] = (
+                    chat_history[chat_id][-20:]
+                )
+
+            print(
+                "✅ تحلیل تصویر با موفقیت انجام شد."
+            )
+
+            return answer
+
+        # ------------------------------
+        # خطاهای تصویر
+        # ------------------------------
+
+        print("❌ Gemini Image Error:")
+        print(response.text)
+
+        if response.status_code == 400:
+
+            return (
+                "❌ Gemini نتونست درخواست تصویر "
+                "رو پردازش کنه.\n"
+                "فرمت یا حجم تصویر رو بررسی کن."
+            )
+
+        elif response.status_code == 403:
+
+            return (
+                "❌ دسترسی Gemini برای تحلیل "
+                "تصویر رد شد.\n"
+                "API Key رو بررسی کن."
+            )
+
+        elif response.status_code == 429:
+
+            return (
+                "⏳ درخواست‌های Gemini بیش از حد مجاز شده.\n"
+                "لطفاً کمی بعد دوباره امتحان کن."
+            )
+
+        elif response.status_code == 503:
+
+            return (
+                "⏳ سرویس Gemini فعلاً شلوغ است.\n"
+                "چند لحظه بعد دوباره امتحان کن."
+            )
+
+        else:
+
+            return (
+                "❌ متأسفانه فعلاً نتونستم "
+                "تصویر رو تحلیل کنم.\n"
+                "چند لحظه دیگه دوباره امتحان کن."
+            )
+
+    except requests.exceptions.Timeout:
+
+        print(
+            "❌ تحلیل تصویر Timeout شد."
+        )
+
+        return (
+            "⏳ تحلیل تصویر خیلی طول کشید.\n"
+            "لطفاً دوباره امتحان کن."
+        )
+
+    except requests.exceptions.RequestException as e:
+
+        print(
+            "❌ خطای ارتباط تصویر با Gemini:"
+        )
+
+        print(e)
+
+        return (
+            "❌ ارتباط با Gemini برای "
+            "تحلیل تصویر برقرار نشد."
+        )
+
+    except Exception as e:
+
+        print(
+            "❌ خطای ناشناخته در تحلیل تصویر:"
+        )
+
+        print(e)
+
+        return (
+            "❌ هنگام تحلیل تصویر مشکلی پیش آمد."
         )
 
 
@@ -441,7 +755,6 @@ def handle_callback(update):
             e
         )
 
-
     # ----------------------------------------------
     # درباره ربات
     # ----------------------------------------------
@@ -455,11 +768,9 @@ def handle_callback(update):
             "این ربات یک دستیار هوشمند "
             "تلگرامی است که با استفاده "
             "از Gemini API ساخته شده است.\n\n"
-            "✨ در ساخت و توسعه این ربات "
-            "نیز از هوش مصنوعی ChatGPT "
-            "کمک گرفته شده است."
+            "✨ قابلیت تحلیل تصویر نیز "
+            "به ربات اضافه شده است."
         )
-
 
     # ----------------------------------------------
     # هوش مصنوعی
@@ -470,6 +781,7 @@ def handle_callback(update):
         ai_users.add(chat_id)
 
         if chat_id not in chat_history:
+
             chat_history[chat_id] = []
 
         send_message(
@@ -477,6 +789,8 @@ def handle_callback(update):
 
             "🧠 حالت هوش مصنوعی فعال شد!\n\n"
             "پیامت رو بفرست تا جواب بدم.\n\n"
+            "🖼️ می‌تونی عکس هم بفرستی "
+            "تا تصویر رو بررسی کنم.\n\n"
             "برای خروج از این حالت:\n"
             "/stop"
         )
@@ -495,24 +809,21 @@ def handle_message(message):
 
     chat_id = chat.get("id")
 
+    if not chat_id:
+        return
+
+    # ==================================================
+    # متن پیام
+    # ==================================================
+
     text = message.get(
         "text",
         ""
     ).strip()
 
-    if not chat_id:
-        return
-
-    print("========================================")
-    print(f"📩 پیام دریافت شد")
-    print(f"👤 Chat ID: {chat_id}")
-    print(f"💬 Text: {text}")
-    print("========================================")
-
-
-    # ==========================================
+    # ==================================================
     # /start
-    # ==========================================
+    # ==================================================
 
     if text == "/start":
 
@@ -547,10 +858,9 @@ def handle_message(message):
 
         return
 
-
-    # ==========================================
+    # ==================================================
     # /stop
-    # ==========================================
+    # ==================================================
 
     if text == "/stop":
 
@@ -568,254 +878,60 @@ def handle_message(message):
 
         return
 
+    # ==================================================
+    # دریافت عکس
+    # ==================================================
 
-    # ==========================================
-    # حالت هوش مصنوعی
-    # ==========================================
+    if "photo" in message:
 
-    if chat_id in ai_users:
+        print("========================================")
+        print("🖼️ عکس دریافت شد")
+        print(f"👤 Chat ID: {chat_id}")
+        print("========================================")
 
-        print("🧠 کاربر در حالت هوش مصنوعی است.")
+        # فقط در حالت AI
+        if chat_id not in ai_users:
 
-        # پیام موقت
-        thinking_response = send_message(
-            chat_id,
-            "🧠 دارم فکر می‌کنم..."
-        )
-
-        thinking_message_id = None
-
-        if thinking_response:
-
-            if thinking_response.get("ok"):
-
-                thinking_message_id = (
-                    thinking_response
-                    .get("result", {})
-                    .get("message_id")
-                )
-
-                print(
-                    f"🧠 Thinking Message ID: "
-                    f"{thinking_message_id}"
-                )
-
-        print("🧠 ارسال پیام به Gemini...")
-
-        answer = ask_gemini(
-            chat_id,
-            text
-        )
-
-        print("📤 ارسال پاسخ Gemini به کاربر...")
-
-        send_message(
-            chat_id,
-            answer
-        )
-
-        # حذف پیام «دارم فکر می‌کنم»
-        if thinking_message_id:
-
-            print(
-                "🗑 در حال حذف پیام «دارم فکر می‌کنم»..."
-            )
-
-            delete_message(
+            send_message(
                 chat_id,
-                thinking_message_id
+
+                "🖼️ عکس دریافت شد!\n\n"
+                "اول گزینه «🧠 هوش مصنوعی» "
+                "رو فعال کن، بعد عکست رو بفرست."
             )
 
-        print("✅ پردازش پیام تمام شد.")
+            return
 
-        return
-
-
-    # ==========================================
-    # سلام
-    # ==========================================
-
-    if text in [
-        "سلام",
-        "سلام!",
-        "سلام 👋"
-    ]:
-
-        send_message(
-            chat_id,
-            "سلام! 👋 خوش اومدی!"
+        photos = message.get(
+            "photo",
+            []
         )
 
-        return
+        if not photos:
 
+            send_message(
+                chat_id,
+                "❌ نتونستم اطلاعات عکس رو دریافت کنم."
+            )
 
-    # ==========================================
-    # پیام ناشناخته
-    # ==========================================
+            return
 
-    send_message(
-        chat_id,
+        # Telegram چند سایز از عکس می‌فرستد
+        # آخرین مورد معمولاً بزرگ‌ترین سایز است
+        largest_photo = photos[-1]
 
-        "🤔 متوجه نشدم.\n\n"
-        "برای دیدن منوی ربات "
-        "/start رو بفرست."
-    )
-
-
-# ==================================================
-# دریافت پیام‌های تلگرام
-# ==================================================
-
-def telegram_bot():
-
-    global offset
-
-    print("🤖 ربات تلگرام روشن شد!")
-
-    # تست اتصال به Telegram
-    try:
-
-        me_response = requests.get(
-            f"{TELEGRAM_URL}/getMe",
-            timeout=30
+        file_id = largest_photo.get(
+            "file_id"
         )
 
-        me_result = me_response.json()
+        if not file_id:
 
-        if me_result.get("ok"):
-
-            bot_username = (
-                me_result["result"]
-                .get("username")
+            send_message(
+                chat_id,
+                "❌ شناسه عکس پیدا نشد."
             )
 
-            print(
-                f"✅ اتصال به Telegram موفق بود: "
-                f"@{bot_username}"
-            )
+            return
 
-        else:
-
-            print(
-                "❌ اتصال به Telegram ناموفق:"
-            )
-
-            print(me_result)
-
-    except Exception as e:
-
-        print(
-            "❌ خطا در تست Telegram:",
-            e
-        )
-
-
-    # ==========================================
-    # حلقه اصلی
-    # ==========================================
-
-    while True:
-
-        try:
-
-            print("🔄 در حال دریافت پیام‌های Telegram...")
-
-            response = requests.get(
-                f"{TELEGRAM_URL}/getUpdates",
-                params={
-                    "offset": offset,
-                    "timeout": 30
-                },
-                timeout=40
-            )
-
-            data = response.json()
-
-            if not data.get("ok"):
-
-                print(
-                    "❌ Telegram getUpdates Error:"
-                )
-
-                print(data)
-
-                time.sleep(3)
-
-                continue
-
-
-            updates = data.get(
-                "result",
-                []
-            )
-
-            if updates:
-
-                print(
-                    f"📥 تعداد آپدیت‌های جدید: "
-                    f"{len(updates)}"
-                )
-
-
-            for update in updates:
-
-                offset = update["update_id"] + 1
-
-                # ----------------------------------
-                # Callback
-                # ----------------------------------
-
-                if "callback_query" in update:
-
-                    handle_callback(update)
-
-                    continue
-
-
-                # ----------------------------------
-                # Message
-                # ----------------------------------
-
-                if "message" in update:
-
-                    handle_message(
-                        update["message"]
-                    )
-
-
-        except requests.exceptions.Timeout:
-
-            # Timeout در getUpdates طبیعی است
-            continue
-
-        except Exception as e:
-
-            print(
-                "❌ خطای کلی Telegram Bot:"
-            )
-
-            print(e)
-
-            time.sleep(3)
-
-
-# ==================================================
-# شروع برنامه
-# ==================================================
-
-if __name__ == "__main__":
-
-    print("========================================")
-    print("🚀 Starting Telegram AI Bot")
-    print("========================================")
-
-    # Flask برای Render
-    web_thread = threading.Thread(
-        target=run_web_server,
-        daemon=True
-    )
-
-    web_thread.start()
-
-    # ربات تلگرام
-    telegram_bot()
+        # کپشن عکس
+        
