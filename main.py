@@ -933,5 +933,373 @@ def handle_message(message):
 
             return
 
-        # کپشن عکس
+                # کپشن عکس
+        caption = message.get(
+            "caption",
+            ""
+        ).strip()
+
+        if not caption:
+            caption = (
+                "این تصویر را با دقت بررسی کن "
+                "و درباره آن توضیح بده."
+            )
+
+        print(
+            f"📝 Caption: {caption}"
+        )
+
+        # ==================================================
+        # پیام «دارم بررسی می‌کنم»
+        # ==================================================
+
+        thinking_response = send_message(
+            chat_id,
+            "🖼️ دارم تصویر رو بررسی می‌کنم..."
+        )
+
+        thinking_message_id = None
+
+        if thinking_response:
+            if thinking_response.get("ok"):
+                thinking_message_id = (
+                    thinking_response
+                    .get("result", {})
+                    .get("message_id")
+                )
+
+        # ==================================================
+        # دریافت اطلاعات فایل از Telegram
+        # ==================================================
+
+        file_path = get_telegram_file(
+            file_id
+        )
+
+        if not file_path:
+
+            answer = (
+                "❌ نتونستم اطلاعات عکس رو "
+                "از تلگرام دریافت کنم."
+            )
+
+        else:
+
+            print(
+                f"📁 Telegram File Path: {file_path}"
+            )
+
+            # ==================================================
+            # دانلود عکس
+            # ==================================================
+
+            image_bytes = download_telegram_file(
+                file_path
+            )
+
+            if not image_bytes:
+
+                answer = (
+                    "❌ نتونستم عکس رو "
+                    "از تلگرام دانلود کنم."
+                )
+
+            else:
+
+                print(
+                    f"📦 حجم عکس: "
+                    f"{len(image_bytes)} bytes"
+                )
+
+                # ==================================================
+                # تشخیص نوع تصویر
+                # ==================================================
+
+                mime_type = get_image_mime_type(
+                    file_path
+                )
+
+                print(
+                    f"🖼️ MIME Type: {mime_type}"
+                )
+
+                # ==================================================
+                # ارسال تصویر به Gemini
+                # ==================================================
+
+                answer = ask_gemini_image(
+                    chat_id,
+                    image_bytes,
+                    mime_type,
+                    caption
+                )
+
+        # ==================================================
+        # ارسال پاسخ Gemini
+        # ==================================================
+
+        send_message(
+            chat_id,
+            answer
+        )
+
+        # ==================================================
+        # حذف پیام در حال بررسی
+        # ==================================================
+
+        if thinking_message_id:
+
+            delete_message(
+                chat_id,
+                thinking_message_id
+            )
+
+        print(
+            "✅ پردازش تصویر تمام شد."
+        )
+
+        return
+
+    # ==================================================
+    # حالت هوش مصنوعی - پیام متنی
+    # ==================================================
+
+    if chat_id in ai_users:
+
+        print("========================================")
+        print("🧠 کاربر در حالت هوش مصنوعی است.")
+        print(f"👤 Chat ID: {chat_id}")
+        print(f"💬 Text: {text}")
+        print("========================================")
+
+        if not text:
+            return
+
+        # ==================================================
+        # پیام در حال فکر کردن
+        # ==================================================
+
+        thinking_response = send_message(
+            chat_id,
+            "🧠 دارم فکر می‌کنم..."
+        )
+
+        thinking_message_id = None
+
+        if thinking_response:
+
+            if thinking_response.get("ok"):
+
+                thinking_message_id = (
+                    thinking_response
+                    .get("result", {})
+                    .get("message_id")
+                )
+
+        # ==================================================
+        # ارسال متن به Gemini
+        # ==================================================
+
+        answer = ask_gemini(
+            chat_id,
+            text
+        )
+
+        # ==================================================
+        # ارسال جواب
+        # ==================================================
+
+        send_message(
+            chat_id,
+            answer
+        )
+
+        # ==================================================
+        # حذف پیام «دارم فکر می‌کنم»
+        # ==================================================
+
+        if thinking_message_id:
+
+            delete_message(
+                chat_id,
+                thinking_message_id
+            )
+
+        print(
+            "✅ پردازش پیام متنی تمام شد."
+        )
+
+        return
+
+    # ==================================================
+    # پیام ناشناخته
+    # ==================================================
+
+    send_message(
+        chat_id,
+        "🤔 متوجه نشدم.\n\n"
+        "برای شروع دوباره /start رو بفرست."
+    )
+
+
+# ==================================================
+# دریافت پیام‌های Telegram
+# ==================================================
+
+def telegram_bot():
+
+    global offset
+
+    print("🤖 ربات تلگرام روشن شد!")
+
+    # ==================================================
+    # تست اتصال به Telegram
+    # ==================================================
+
+    try:
+
+        response = requests.get(
+            f"{TELEGRAM_URL}/getMe",
+            timeout=30
+        )
+
+        result = response.json()
+
+        if result.get("ok"):
+
+            username = (
+                result["result"]
+                .get("username")
+            )
+
+            print(
+                f"✅ اتصال به Telegram موفق بود: "
+                f"@{username}"
+            )
+
+        else:
+
+            print(
+                "❌ اتصال به Telegram ناموفق:"
+            )
+
+            print(result)
+
+    except Exception as e:
+
+        print(
+            "❌ خطا در اتصال به Telegram:"
+        )
+
+        print(e)
+
+    # ==================================================
+    # حلقه دریافت پیام
+    # ==================================================
+
+    while True:
+
+        try:
+
+            response = requests.get(
+                f"{TELEGRAM_URL}/getUpdates",
+                params={
+                    "offset": offset,
+                    "timeout": 30
+                },
+                timeout=40
+            )
+
+            data = response.json()
+
+            if not data.get("ok"):
+
+                print(
+                    "❌ Telegram getUpdates Error:"
+                )
+
+                print(data)
+
+                time.sleep(3)
+
+                continue
+
+            updates = data.get(
+                "result",
+                []
+            )
+
+            for update in updates:
+
+                offset = (
+                    update["update_id"] + 1
+                )
+
+                # ==================================================
+                # Callback Query
+                # ==================================================
+
+                if "callback_query" in update:
+
+                    handle_callback(
+                        update
+                    )
+
+                    continue
+
+                # ==================================================
+                # Message
+                # ==================================================
+
+                if "message" in update:
+
+                    handle_message(
+                        update["message"]
+                    )
+
+        except requests.exceptions.Timeout:
+
+            print(
+                "⏳ Telegram Timeout..."
+            )
+
+            continue
+
+        except Exception as e:
+
+            print(
+                "❌ خطای کلی ربات:"
+            )
+
+            print(e)
+
+            time.sleep(3)
+
+
+# ==================================================
+# شروع برنامه
+# ==================================================
+
+if __name__ == "__main__":
+
+    print("========================================")
+    print("🚀 Starting Telegram AI Bot")
+    print("========================================")
+
+    # ==================================================
+    # اجرای Flask برای Render
+    # ==================================================
+
+    web_thread = threading.Thread(
+        target=run_web_server,
+        daemon=True
+    )
+
+    web_thread.start()
+
+    # ==================================================
+    # اجرای ربات Telegram
+    # ==================================================
+
+    telegram_bot()
         
