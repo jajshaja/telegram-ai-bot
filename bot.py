@@ -11,13 +11,13 @@ load_dotenv()
 # ===================================
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-BAI_API_KEY = os.getenv("BAI_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
-TEXT_MODEL = "deepseek-v4-flash"
-VISION_MODEL = "deepseek-v4-flash-vision-exp"
+TEXT_MODEL = "minimax/minimax-m3:free"
+VISION_MODEL = "minimax/minimax-m3:free"
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-BAI_URL = "https://api.b.ai/v1/chat/completions"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # حافظه موقت
 chat_history = {}
@@ -36,6 +36,7 @@ offset = 0
 def send_message(chat_id, text):
 
     try:
+
         response = requests.post(
             f"{TELEGRAM_URL}/sendMessage",
             json={
@@ -46,29 +47,40 @@ def send_message(chat_id, text):
         )
 
         if response.status_code != 200:
-            print("❌ Telegram Send Error:", response.status_code)
+
+            print(
+                "❌ Telegram Send Error:",
+                response.status_code
+            )
+
             return None
 
         return response.json()
 
     except Exception as e:
-        print("❌ Telegram Send Error:", e)
+
+        print(
+            "❌ Telegram Send Error:",
+            e
+        )
+
         return None
 
 
 # ===================================
-# درخواست متنی به B.AI
+# درخواست متنی به OpenRouter
 # ===================================
 
 def ask_bai(chat_id, text):
 
     print("\n==============================")
-    print("🧠 درخواست B.AI")
+    print("🧠 درخواست OpenRouter")
     print("👤 Chat:", chat_id)
     print("💬 Text:", text)
-    print("📡 ارسال به B.AI...")
+    print("📡 ارسال به OpenRouter...")
 
     if chat_id not in chat_history:
+
         chat_history[chat_id] = []
 
     chat_history[chat_id].append({
@@ -85,39 +97,66 @@ def ask_bai(chat_id, text):
     }
 
     headers = {
-        "Authorization": f"Bearer {BAI_API_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/jajshaja/telegram-ai-bot",
+        "X-Title": "Telegram AI Bot"
     }
 
     try:
 
         response = requests.post(
-            BAI_URL,
+            OPENROUTER_URL,
             headers=headers,
             json=data,
             timeout=120
         )
 
-        print("B.AI Status:", response.status_code)
+        print(
+            "OpenRouter Status:",
+            response.status_code
+        )
 
         if response.status_code != 200:
-            print("❌ B.AI Error:", response.text[:500])
+
+            print(
+                "❌ OpenRouter Error:",
+                response.text[:500]
+            )
+
             return None
 
         result = response.json()
 
-        choices = result.get("choices", [])
+        choices = result.get(
+            "choices",
+            []
+        )
 
         if not choices:
-            print("❌ B.AI پاسخ نداد.")
+
+            print(
+                "❌ OpenRouter پاسخ نداد."
+            )
+
             return None
 
-        message = choices[0].get("message", {})
+        message = choices[0].get(
+            "message",
+            {}
+        )
 
-        answer = message.get("content", "")
+        answer = message.get(
+            "content",
+            ""
+        )
 
         if not answer:
-            print("❌ پاسخ B.AI خالی بود.")
+
+            print(
+                "❌ پاسخ OpenRouter خالی بود."
+            )
+
             return None
 
         answer = answer.strip()
@@ -127,15 +166,21 @@ def ask_bai(chat_id, text):
             "content": answer
         })
 
-        chat_history[chat_id] = chat_history[chat_id][-20:]
+        chat_history[chat_id] = \
+            chat_history[chat_id][-20:]
 
-        print("✅ پاسخ B.AI دریافت شد.")
+        print(
+            "✅ پاسخ OpenRouter دریافت شد."
+        )
 
         return answer
 
     except Exception as e:
 
-        print("❌ خطای B.AI:", e)
+        print(
+            "❌ خطای OpenRouter:",
+            e
+        )
 
         return None
 
@@ -157,19 +202,28 @@ def get_telegram_file(file_id):
         )
 
         if response.status_code != 200:
-            print("❌ getFile Error:", response.status_code)
+
+            print(
+                "❌ getFile Error:",
+                response.status_code
+            )
+
             return None
 
         result = response.json()
 
         if result.get("ok"):
+
             return result["result"]["file_path"]
 
         return None
 
     except Exception as e:
 
-        print("❌ خطای getFile:", e)
+        print(
+            "❌ خطای getFile:",
+            e
+        )
 
         return None
 
@@ -212,13 +266,16 @@ def download_file(file_path):
 
     except Exception as e:
 
-        print("❌ خطای دانلود:", e)
+        print(
+            "❌ خطای دانلود:",
+            e
+        )
 
         return None
 
 
 # ===================================
-# تحلیل تصویر با B.AI
+# تحلیل تصویر با OpenRouter
 # ===================================
 
 def ask_bai_image(
@@ -231,7 +288,7 @@ def ask_bai_image(
     print("🖼️ تحلیل تصویر")
     print("👤 Chat:", chat_id)
     print("📏 Size:", len(image_bytes))
-    print("📡 ارسال تصویر به B.AI...")
+    print("📡 ارسال تصویر به OpenRouter...")
 
     if not caption:
 
@@ -278,28 +335,30 @@ def ask_bai_image(
     }
 
     headers = {
-        "Authorization": f"Bearer {BAI_API_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/jajshaja/telegram-ai-bot",
+        "X-Title": "Telegram AI Bot"
     }
 
     try:
 
         response = requests.post(
-            BAI_URL,
+            OPENROUTER_URL,
             headers=headers,
             json=data,
             timeout=180
         )
 
         print(
-            "B.AI Image Status:",
+            "OpenRouter Image Status:",
             response.status_code
         )
 
         if response.status_code != 200:
 
             print(
-                "❌ B.AI Image Error:",
+                "❌ OpenRouter Image Error:",
                 response.text[:500]
             )
 
@@ -314,7 +373,9 @@ def ask_bai_image(
 
         if not choices:
 
-            print("❌ B.AI برای تصویر پاسخ نداد.")
+            print(
+                "❌ OpenRouter برای تصویر پاسخ نداد."
+            )
 
             return None
 
@@ -330,7 +391,9 @@ def ask_bai_image(
 
         if not answer:
 
-            print("❌ پاسخ تصویر خالی بود.")
+            print(
+                "❌ پاسخ تصویر خالی بود."
+            )
 
             return None
 
@@ -338,6 +401,7 @@ def ask_bai_image(
 
         # ذخیره نسخه متنی تصویر در حافظه
         if chat_id not in chat_history:
+
             chat_history[chat_id] = []
 
         chat_history[chat_id].append({
@@ -353,13 +417,18 @@ def ask_bai_image(
         chat_history[chat_id] = \
             chat_history[chat_id][-20:]
 
-        print("✅ تصویر با موفقیت تحلیل شد.")
+        print(
+            "✅ تصویر با موفقیت تحلیل شد."
+        )
 
         return answer
 
     except Exception as e:
 
-        print("❌ خطای تحلیل تصویر:", e)
+        print(
+            "❌ خطای تحلیل تصویر:",
+            e
+        )
 
         return None
 
@@ -378,6 +447,7 @@ def handle_message(message):
     chat_id = chat.get("id")
 
     if not chat_id:
+
         return
 
     # =================================
@@ -537,7 +607,7 @@ def handle_message(message):
 
             send_message(
                 chat_id,
-                "❌ B.AI فعلاً نتونست تصویر رو پاسخ بده."
+                "❌ OpenRouter فعلاً نتونست تصویر رو پاسخ بده."
             )
 
         return
@@ -553,7 +623,7 @@ def handle_message(message):
             text
         )
 
-        # اگر B.AI جواب داد، همان جواب ارسال شود
+        # اگر OpenRouter جواب داد
         if answer:
 
             send_message(
@@ -565,7 +635,7 @@ def handle_message(message):
 
             send_message(
                 chat_id,
-                "❌ B.AI فعلاً پاسخ نداد."
+                "❌ OpenRouter فعلاً پاسخ نداد."
             )
 
 
@@ -647,9 +717,11 @@ def clear_old_updates():
         )
 
         if response.status_code != 200:
+
             print(
                 "⚠️ نتونستم آپدیت‌های قدیمی رو بررسی کنم."
             )
+
             return
 
         result = response.json()
@@ -694,12 +766,12 @@ print(
 )
 
 print(
-    "🧠 B.AI Text:",
+    "🧠 OpenRouter Text:",
     TEXT_MODEL
 )
 
 print(
-    "🖼️ B.AI Vision:",
+    "🖼️ OpenRouter Vision:",
     VISION_MODEL
 )
 
@@ -721,12 +793,12 @@ if (
 
 
 if (
-    not BAI_API_KEY
-    or BAI_API_KEY.startswith("اینجا_")
+    not OPENROUTER_API_KEY
+    or OPENROUTER_API_KEY.startswith("اینجا_")
 ):
 
     print(
-        "❌ BAI_API_KEY تنظیم نشده."
+        "❌ OPENROUTER_API_KEY تنظیم نشده."
     )
 
     raise SystemExit
@@ -850,7 +922,7 @@ while True:
                         send_message(
                             chat_id,
                             "🤖 ربات هوش مصنوعی\n\n"
-                            "قدرت گرفته از B.AI"
+                            "قدرت گرفته از OpenRouter"
                         )
 
                     # پاسخ به callback
@@ -866,6 +938,7 @@ while True:
                         )
 
                     except Exception:
+
                         pass
 
     except KeyboardInterrupt:
