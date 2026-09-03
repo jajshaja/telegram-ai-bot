@@ -13,13 +13,35 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+# مدل اصلی
 TEXT_MODEL = "minimax/minimax-m3:free"
 VISION_MODEL = "minimax/minimax-m3:free"
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+# مدل‌های جایگزین
+TEXT_FALLBACK_MODELS = [
+    TEXT_MODEL,
+    "nvidia/nemotron-3-ultra:free",
+    "openrouter/free"
+]
 
+VISION_FALLBACK_MODELS = [
+    VISION_MODEL,
+    "nvidia/nemotron-3-ultra:free",
+    "openrouter/free"
+]
+
+TELEGRAM_URL = (
+    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+)
+
+OPENROUTER_URL = (
+    "https://openrouter.ai/api/v1/chat/completions"
+)
+
+# ===================================
 # حافظه موقت
+# ===================================
+
 chat_history = {}
 
 # کاربران فعال
@@ -34,6 +56,8 @@ offset = 0
 # ===================================
 
 def send_message(chat_id, text):
+
+    start_time = time.time()
 
     try:
 
@@ -55,6 +79,15 @@ def send_message(chat_id, text):
 
             return None
 
+        print(
+            "⏱️ Telegram send time:",
+            round(
+                time.time() - start_time,
+                2
+            ),
+            "seconds"
+        )
+
         return response.json()
 
     except Exception as e:
@@ -69,6 +102,7 @@ def send_message(chat_id, text):
 
 # ===================================
 # درخواست متنی به OpenRouter
+# با سیستم Fallback
 # ===================================
 
 def ask_bai(chat_id, text):
@@ -77,7 +111,6 @@ def ask_bai(chat_id, text):
     print("🧠 درخواست OpenRouter")
     print("👤 Chat:", chat_id)
     print("💬 Text:", text)
-    print("📡 ارسال به OpenRouter...")
 
     if chat_id not in chat_history:
 
@@ -90,99 +123,186 @@ def ask_bai(chat_id, text):
 
     history = chat_history[chat_id][-10:]
 
-    data = {
-        "model": TEXT_MODEL,
-        "messages": history,
-        "stream": False
-    }
-
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/jajshaja/telegram-ai-bot",
+        "HTTP-Referer": (
+            "https://github.com/"
+            "jajshaja/telegram-ai-bot"
+        ),
         "X-Title": "Telegram AI Bot"
     }
 
-    try:
-
-        response = requests.post(
-            OPENROUTER_URL,
-            headers=headers,
-            json=data,
-            timeout=120
-        )
+    for model in TEXT_FALLBACK_MODELS:
 
         print(
-            "OpenRouter Status:",
-            response.status_code
+            "\n📡 امتحان مدل:",
+            model
         )
 
-        if response.status_code != 200:
+        data = {
+            "model": model,
+            "messages": history,
+            "stream": False
+        }
 
-            print(
-                "❌ OpenRouter Error:",
-                response.text[:500]
+        try:
+
+            start_time = time.time()
+
+            response = requests.post(
+                OPENROUTER_URL,
+                headers=headers,
+                json=data,
+                timeout=120
             )
 
-            return None
-
-        result = response.json()
-
-        choices = result.get(
-            "choices",
-            []
-        )
-
-        if not choices:
-
-            print(
-                "❌ OpenRouter پاسخ نداد."
+            elapsed = round(
+                time.time() - start_time,
+                2
             )
 
-            return None
-
-        message = choices[0].get(
-            "message",
-            {}
-        )
-
-        answer = message.get(
-            "content",
-            ""
-        )
-
-        if not answer:
-
             print(
-                "❌ پاسخ OpenRouter خالی بود."
+                "⏱️ زمان پاسخ:",
+                elapsed,
+                "ثانیه"
             )
 
-            return None
+            print(
+                "OpenRouter Status:",
+                response.status_code
+            )
 
-        answer = answer.strip()
+            # =================================
+            # موفق
+            # =================================
 
-        chat_history[chat_id].append({
-            "role": "assistant",
-            "content": answer
-        })
+            if response.status_code == 200:
 
-        chat_history[chat_id] = \
-            chat_history[chat_id][-20:]
+                result = response.json()
 
-        print(
-            "✅ پاسخ OpenRouter دریافت شد."
-        )
+                choices = result.get(
+                    "choices",
+                    []
+                )
 
-        return answer
+                if not choices:
 
-    except Exception as e:
+                    print(
+                        "⚠️ مدل پاسخ خالی داد."
+                    )
 
-        print(
-            "❌ خطای OpenRouter:",
-            e
-        )
+                    continue
 
-        return None
+                message = choices[0].get(
+                    "message",
+                    {}
+                )
+
+                answer = message.get(
+                    "content",
+                    ""
+                )
+
+                if not answer:
+
+                    print(
+                        "⚠️ پاسخ مدل خالی بود."
+                    )
+
+                    continue
+
+                answer = answer.strip()
+
+                chat_history[chat_id].append({
+                    "role": "assistant",
+                    "content": answer
+                })
+
+                chat_history[chat_id] = (
+                    chat_history[chat_id][-20:]
+                )
+
+                print(
+                    "✅ مدل موفق:",
+                    model
+                )
+
+                print(
+                    "✅ پاسخ OpenRouter دریافت شد."
+                )
+
+                return answer
+
+            # =================================
+            # Rate Limit
+            # =================================
+
+            elif response.status_code == 429:
+
+                print(
+                    "⚠️ Rate Limit مدل:",
+                    model
+                )
+
+                continue
+
+            # =================================
+            # خطاهای سرور
+            # =================================
+
+            elif response.status_code >= 500:
+
+                print(
+                    "⚠️ خطای سرور مدل:",
+                    model,
+                    response.status_code
+                )
+
+                continue
+
+            # =================================
+            # سایر خطاها
+            # =================================
+
+            else:
+
+                print(
+                    "⚠️ مدل پاسخ ناموفق داد:",
+                    model
+                )
+
+                print(
+                    response.text[:300]
+                )
+
+                continue
+
+        except Exception as e:
+
+            print(
+                "⚠️ خطا در مدل:",
+                model
+            )
+
+            print(
+                "جزئیات:",
+                e
+            )
+
+            continue
+
+    # ===================================
+    # همه مدل‌ها شکست خوردند
+    # ===================================
+
+    print(
+        "❌ تمام مدل‌های متنی شکست خوردند."
+    )
+
+    return None
 
 
 # ===================================
@@ -229,7 +349,7 @@ def get_telegram_file(file_id):
 
 
 # ===================================
-# دانلود عکس
+# دانلود فایل
 # ===================================
 
 def download_file(file_path):
@@ -276,6 +396,7 @@ def download_file(file_path):
 
 # ===================================
 # تحلیل تصویر با OpenRouter
+# با سیستم Fallback
 # ===================================
 
 def ask_bai_image(
@@ -287,8 +408,10 @@ def ask_bai_image(
     print("\n==============================")
     print("🖼️ تحلیل تصویر")
     print("👤 Chat:", chat_id)
-    print("📏 Size:", len(image_bytes))
-    print("📡 ارسال تصویر به OpenRouter...")
+    print(
+        "📏 Size:",
+        len(image_bytes)
+    )
 
     if not caption:
 
@@ -308,15 +431,21 @@ def ask_bai_image(
     )[-8:]
 
     current_message = {
+
         "role": "user",
+
         "content": [
+
             {
                 "type": "text",
                 "text": caption
             },
+
             {
                 "type": "image_url",
+
                 "image_url": {
+
                     "url": (
                         "data:image/jpeg;base64,"
                         + image_base64
@@ -326,111 +455,216 @@ def ask_bai_image(
         ]
     }
 
-    data = {
-        "model": VISION_MODEL,
-        "messages": history + [
-            current_message
-        ],
-        "stream": False
-    }
-
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
+
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/jajshaja/telegram-ai-bot",
+
+        "HTTP-Referer": (
+            "https://github.com/"
+            "jajshaja/telegram-ai-bot"
+        ),
+
         "X-Title": "Telegram AI Bot"
     }
 
-    try:
+    # ===================================
+    # امتحان مدل‌های Vision
+    # ===================================
 
-        response = requests.post(
-            OPENROUTER_URL,
-            headers=headers,
-            json=data,
-            timeout=180
-        )
+    for model in VISION_FALLBACK_MODELS:
 
         print(
-            "OpenRouter Image Status:",
-            response.status_code
+            "\n📡 امتحان Vision مدل:",
+            model
         )
 
-        if response.status_code != 200:
+        data = {
 
-            print(
-                "❌ OpenRouter Image Error:",
-                response.text[:500]
+            "model": model,
+
+            "messages": history + [
+                current_message
+            ],
+
+            "stream": False
+        }
+
+        try:
+
+            start_time = time.time()
+
+            response = requests.post(
+                OPENROUTER_URL,
+                headers=headers,
+                json=data,
+                timeout=180
             )
 
-            return None
-
-        result = response.json()
-
-        choices = result.get(
-            "choices",
-            []
-        )
-
-        if not choices:
-
-            print(
-                "❌ OpenRouter برای تصویر پاسخ نداد."
+            elapsed = round(
+                time.time() - start_time,
+                2
             )
 
-            return None
-
-        message = choices[0].get(
-            "message",
-            {}
-        )
-
-        answer = message.get(
-            "content",
-            ""
-        )
-
-        if not answer:
-
             print(
-                "❌ پاسخ تصویر خالی بود."
+                "⏱️ زمان تحلیل:",
+                elapsed,
+                "ثانیه"
             )
 
-            return None
+            print(
+                "OpenRouter Image Status:",
+                response.status_code
+            )
 
-        answer = answer.strip()
+            # =================================
+            # موفق
+            # =================================
 
-        # ذخیره نسخه متنی تصویر در حافظه
-        if chat_id not in chat_history:
+            if response.status_code == 200:
 
-            chat_history[chat_id] = []
+                result = response.json()
 
-        chat_history[chat_id].append({
-            "role": "user",
-            "content": "[تصویر] " + caption
-        })
+                choices = result.get(
+                    "choices",
+                    []
+                )
 
-        chat_history[chat_id].append({
-            "role": "assistant",
-            "content": answer
-        })
+                if not choices:
 
-        chat_history[chat_id] = \
-            chat_history[chat_id][-20:]
+                    print(
+                        "⚠️ مدل Vision پاسخ نداد."
+                    )
 
-        print(
-            "✅ تصویر با موفقیت تحلیل شد."
-        )
+                    continue
 
-        return answer
+                message = choices[0].get(
+                    "message",
+                    {}
+                )
 
-    except Exception as e:
+                answer = message.get(
+                    "content",
+                    ""
+                )
 
-        print(
-            "❌ خطای تحلیل تصویر:",
-            e
-        )
+                if not answer:
 
-        return None
+                    print(
+                        "⚠️ پاسخ Vision خالی بود."
+                    )
+
+                    continue
+
+                answer = answer.strip()
+
+                # ذخیره نسخه متنی تصویر
+                if chat_id not in chat_history:
+
+                    chat_history[chat_id] = []
+
+                chat_history[chat_id].append({
+
+                    "role": "user",
+
+                    "content": (
+                        "[تصویر] "
+                        + caption
+                    )
+                })
+
+                chat_history[chat_id].append({
+
+                    "role": "assistant",
+
+                    "content": answer
+                })
+
+                chat_history[chat_id] = (
+                    chat_history[chat_id][-20:]
+                )
+
+                print(
+                    "✅ Vision مدل موفق:",
+                    model
+                )
+
+                print(
+                    "✅ تصویر با موفقیت تحلیل شد."
+                )
+
+                return answer
+
+            # =================================
+            # Rate Limit
+            # =================================
+
+            elif response.status_code == 429:
+
+                print(
+                    "⚠️ Vision Rate Limit:",
+                    model
+                )
+
+                continue
+
+            # =================================
+            # خطاهای سرور
+            # =================================
+
+            elif response.status_code >= 500:
+
+                print(
+                    "⚠️ Vision Server Error:",
+                    model,
+                    response.status_code
+                )
+
+                continue
+
+            # =================================
+            # سایر خطاها
+            # =================================
+
+            else:
+
+                print(
+                    "⚠️ Vision مدل ناموفق:",
+                    model
+                )
+
+                print(
+                    response.text[:300]
+                )
+
+                continue
+
+        except Exception as e:
+
+            print(
+                "⚠️ خطا در Vision مدل:",
+                model
+            )
+
+            print(
+                "جزئیات:",
+                e
+            )
+
+            continue
+
+    # ===================================
+    # همه مدل‌های Vision شکست خوردند
+    # ===================================
+
+    print(
+        "❌ تمام مدل‌های Vision شکست خوردند."
+    )
+
+    return None
 
 
 # ===================================
@@ -447,7 +681,6 @@ def handle_message(message):
     chat_id = chat.get("id")
 
     if not chat_id:
-
         return
 
     # =================================
@@ -595,7 +828,10 @@ def handle_message(message):
             caption
         )
 
-        # فقط اگر واقعاً جواب گرفتیم ارسال کن
+        # =================================
+        # اگر جواب گرفتیم
+        # =================================
+
         if answer:
 
             send_message(
@@ -603,11 +839,15 @@ def handle_message(message):
                 answer
             )
 
+        # =================================
+        # هیچ مدلی جواب نداد
+        # =================================
+
         else:
 
             send_message(
                 chat_id,
-                "❌ OpenRouter فعلاً نتونست تصویر رو پاسخ بده."
+                "❌ هوش مصنوعی فعلاً پاسخی نداد."
             )
 
         return
@@ -623,7 +863,7 @@ def handle_message(message):
             text
         )
 
-        # اگر OpenRouter جواب داد
+        # اگر جواب گرفتیم
         if answer:
 
             send_message(
@@ -631,11 +871,12 @@ def handle_message(message):
                 answer
             )
 
+        # اگر هیچ مدل جواب نداد
         else:
 
             send_message(
                 chat_id,
-                "❌ OpenRouter فعلاً پاسخ نداد."
+                "❌ هوش مصنوعی فعلاً پاسخی نداد."
             )
 
 
@@ -719,7 +960,8 @@ def clear_old_updates():
         if response.status_code != 200:
 
             print(
-                "⚠️ نتونستم آپدیت‌های قدیمی رو بررسی کنم."
+                "⚠️ نتونستم آپدیت‌های قدیمی "
+                "رو بررسی کنم."
             )
 
             return
@@ -733,7 +975,9 @@ def clear_old_updates():
 
         if updates:
 
-            offset = updates[-1]["update_id"] + 1
+            offset = (
+                updates[-1]["update_id"] + 1
+            )
 
             print(
                 "🗑️ آپدیت‌های قدیمی پاک شدند."
@@ -776,10 +1020,19 @@ print(
 )
 
 print(
+    "🔄 Fallback:",
+    "فعال"
+)
+
+print(
     "==================================="
 )
 
+
+# ===================================
 # بررسی کلیدها
+# ===================================
+
 if (
     not TELEGRAM_TOKEN
     or TELEGRAM_TOKEN.startswith("اینجا_")
@@ -804,7 +1057,10 @@ if (
     raise SystemExit
 
 
+# ===================================
 # تست Telegram
+# ===================================
+
 try:
 
     response = requests.get(
@@ -843,11 +1099,17 @@ except Exception as e:
     )
 
 
+# ===================================
+# پاکسازی آپدیت‌های قدیمی
+# ===================================
+
 clear_old_updates()
+
 
 print(
     "🟢 ربات آماده دریافت پیام جدید است."
 )
+
 
 # ===================================
 # حلقه اصلی
@@ -865,6 +1127,10 @@ while True:
                 update["update_id"] + 1
             )
 
+            # =================================
+            # پیام معمولی
+            # =================================
+
             message = update.get(
                 "message"
             )
@@ -875,7 +1141,10 @@ while True:
                     message
                 )
 
-            # callback query
+            # =================================
+            # Callback Query
+            # =================================
+
             callback = update.get(
                 "callback_query"
             )
@@ -925,21 +1194,27 @@ while True:
                             "قدرت گرفته از OpenRouter"
                         )
 
-                    # پاسخ به callback
-                    try:
+                # =================================
+                # پاسخ به Callback
+                # =================================
 
-                        requests.post(
-                            f"{TELEGRAM_URL}/answerCallbackQuery",
-                            json={
-                                "callback_query_id":
-                                    callback.get("id")
-                            },
-                            timeout=10
-                        )
+                try:
 
-                    except Exception:
+                    requests.post(
+                        f"{TELEGRAM_URL}/"
+                        "answerCallbackQuery",
 
-                        pass
+                        json={
+                            "callback_query_id":
+                            callback.get("id")
+                        },
+
+                        timeout=10
+                    )
+
+                except Exception:
+
+                    pass
 
     except KeyboardInterrupt:
 
