@@ -12,11 +12,12 @@ load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
 # مدل اصلی
 TEXT_MODEL = "minimax/minimax-m3:free"
 VISION_MODEL = "minimax/minimax-m3:free"
-
+GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # مدل‌های جایگزین
 TEXT_FALLBACK_MODELS = [
     TEXT_MODEL,
@@ -104,10 +105,72 @@ def send_message(chat_id, text):
 # درخواست متنی به OpenRouter
 # با سیستم Fallback
 # ===================================
+def ask_groq(chat_id, text):
+    if not GROQ_API_KEY:
+        return None
 
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    messages = chat_history.get(chat_id, [])[-10:]
+    messages = messages + [{"role": "user", "content": text}]
+
+    data = {
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": 300,
+        "temperature": 0.7
+    }
+
+    try:
+        start = time.time()
+        response = requests.post(
+            GROQ_URL,
+            headers=headers,
+            json=data,
+            timeout=60
+        )
+        elapsed = time.time() - start
+
+        print(f"Groq Status: {response.status_code} | Time: {elapsed:.2f}s")
+
+        if response.status_code == 200:
+            result = response.json()
+            answer = result["choices"][0]["message"]["content"]
+
+            chat_history.setdefault(chat_id, []).append({
+                "role": "user",
+                "content": text
+            })
+            chat_history[chat_id].append({
+                "role": "assistant",
+                "content": answer
+            })
+            chat_history[chat_id] = chat_history[chat_id][-20:]
+
+            return answer
+
+        print(f"Groq Error: {response.text[:300]}")
+        return None
+
+    except Exception as e:
+        print(f"Groq Exception: {e}")
+        return None
 def ask_bai(chat_id, text):
 
     print("\n==============================")
+    print("🧠 درخواست Groq")
+
+    groq_answer = ask_groq(chat_id, text)
+
+    if groq_answer:
+        print("✅ پاسخ از Groq دریافت شد")
+        return groq_answer
+
+    print("⚠️ Groq پاسخ نداد → انتقال به OpenRouter")
+
     print("🧠 درخواست OpenRouter")
     print("👤 Chat:", chat_id)
     print("💬 Text:", text)
@@ -122,7 +185,6 @@ def ask_bai(chat_id, text):
     })
 
     history = chat_history[chat_id][-10:]
-
     headers = {
         "Authorization": (
             f"Bearer {OPENROUTER_API_KEY}"
