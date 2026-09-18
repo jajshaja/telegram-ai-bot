@@ -161,16 +161,6 @@ def ask_groq(chat_id, text):
 def ask_bai(chat_id, text):
 
     print("\n==============================")
-    print("🧠 درخواست Groq")
-
-    groq_answer = ask_groq(chat_id, text)
-
-    if groq_answer:
-        print("✅ پاسخ از Groq دریافت شد")
-        return groq_answer
-
-    print("⚠️ Groq پاسخ نداد → انتقال به OpenRouter")
-
     print("🧠 درخواست OpenRouter")
     print("👤 Chat:", chat_id)
     print("💬 Text:", text)
