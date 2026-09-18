@@ -14,7 +14,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY") 
 # مدل اصلی
-TEXT_MODEL = "minimax/minimax-m3:free"
+TEXT_MODEL = "nex-agi/nex-n2.5-mini:free"
 VISION_MODEL = "minimax/minimax-m3:free"
 GROQ_MODEL = "openai/gpt-oss-120b"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
